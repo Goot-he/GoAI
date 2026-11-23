@@ -1,0 +1,110 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>文档知识助手 · Go + Eino Agent</title>
+  <link rel="stylesheet" href="/app.css">
+</head>
+<body>
+
+<div id="auth" class="auth">
+  <div class="auth-card">
+    <div class="auth-brand">
+      <div class="mark">RAG</div>
+      <div>
+        <h1>文档知识助手</h1>
+        <p class="muted">Gin + Eino + DeepSeek · 流式 Agent</p>
+      </div>
+    </div>
+    <div class="auth-tabs">
+      <button class="tab active" data-mode="login">登录</button>
+      <button class="tab" data-mode="register">注册</button>
+    </div>
+    <form id="auth-form" autocomplete="on">
+      <label>邮箱
+        <input id="email" type="email" placeholder="you@example.com" required>
+      </label>
+      <label>密码
+        <input id="password" type="password" placeholder="至少 6 位" minlength="6" required>
+      </label>
+      <button id="auth-submit" class="btn primary block" type="submit">登录</button>
+      <p id="auth-error" class="err"></p>
+    </form>
+  </div>
+</div>
+
+<div id="app" class="app hidden">
+  <aside class="sidebar">
+    <div class="brand">
+      <div class="mark">RAG</div>
+      <div class="brand-text">
+        <strong>文档知识助手</strong>
+        <span id="user-email" class="muted small"></span>
+      </div>
+    </div>
+
+    <button id="new-chat" class="btn primary block">新建会话</button>
+
+    <div class="side-label">历史会话<span class="muted small">点击可恢复</span></div>
+    <ul id="conv-list" class="conv-list"></ul>
+
+    <div class="side-foot">
+      <button id="open-docs" class="btn ghost block">知识库管理</button>
+      <div id="stats" class="stats muted small"></div>
+      <button id="logout" class="link">退出登录</button>
+    </div>
+  </aside>
+
+  <main class="main">
+    <header class="chat-head">
+      <div>
+        <h1 id="chat-title">新会话</h1>
+        <p id="chat-sub" class="muted small">上传文档后提问，回答会标注来源</p>
+      </div>
+      <div class="controls">
+        <label class="switch"><input type="checkbox" id="stream-toggle" checked><span>流式输出</span></label>
+        <label class="switch"><input type="checkbox" id="think-toggle" checked><span>思考过程</span></label>
+      </div>
+    </header>
+
+    <section id="messages" class="messages">
+      <div class="empty" id="empty-hint">
+        <h2>开始一次基于文档的对话</h2>
+        <p>先在「知识库管理」上传 .md / .txt / .docx，再提问。例如：</p>
+        <div class="samples">
+          <button class="sample">这份文档的核心结论是什么？</button>
+          <button class="sample">退货期限是几天？依据是哪一段？</button>
+          <button class="sample">我上传了哪些资料？</button>
+        </div>
+      </div>
+    </section>
+
+    <footer class="composer">
+      <textarea id="input" rows="1" placeholder="输入问题，Enter 发送，Shift + Enter 换行"></textarea>
+      <button id="send" class="btn primary">发送</button>
+    </footer>
+  </main>
+</div>
+
+<div id="docs-modal" class="modal hidden">
+  <div class="modal-card">
+    <header class="modal-head">
+      <h2>知识库</h2>
+      <button id="close-docs" class="icon-btn" title="关闭">×</button>
+    </header>
+    <div class="upload-row">
+      <label class="file-drop" id="file-drop">
+        <input type="file" id="file-input" accept=".txt,.md,.markdown,.docx" hidden>
+        <span>点击选择文件</span>
+        <small class="muted">支持 .txt / .md / .docx，单个 ≤ 10MB</small>
+      </label>
+      <div id="upload-status" class="muted small"></div>
+    </div>
+    <ul id="doc-list" class="doc-list"></ul>
+  </div>
+</div>
+
+<script src="/app.js"></script>
+</body>
+</html>

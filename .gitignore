@@ -1,0 +1,24 @@
+.env
+.env.example
+server*.log
+bin/
+*.exe
+.DS_Store
+
+/run.ps1
+
+logs/
+*.log
+
+
+skills/
+
+docs/eval
+docs/png
+docs/全栈开发--前端快速了解.md
+
+# 编辑器与系统
+.idea/
+.vscode/
+.DS_Store
+Thumbs.db
