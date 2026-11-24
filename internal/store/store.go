@@ -13,15 +13,18 @@ import (
 	"agentragract/internal/config"
 )
 
+// 存储层错误：记录不存在或唯一键冲突。
 var (
 	ErrNotFound = errors.New("not found")
 	ErrConflict = errors.New("conflict")
 )
 
+// Store 封装 MySQL 连接，提供用户、会话、消息、文档与片段的持久化操作。
 type Store struct {
 	DB *sql.DB
 }
 
+// New 连接 MySQL：确保目标库存在、完成建表，并配置连接池。
 func New(ctx context.Context, cfg *config.Config) (*Store, error) {
 	if err := ensureDatabase(ctx, cfg.MySQLDSN); err != nil {
 		return nil, err
@@ -72,6 +75,7 @@ func ensureDatabase(ctx context.Context, dsn string) error {
 	return nil
 }
 
+// migrate 执行建表语句，创建 users/conversations/messages/documents/chunks 五张表。
 func (s *Store) migrate(ctx context.Context) error {
 	stmts := []string{
 		`CREATE TABLE IF NOT EXISTS users (
@@ -141,16 +145,19 @@ func (s *Store) migrate(ctx context.Context) error {
 	return nil
 }
 
+// Close 关闭数据库连接。
 func (s *Store) Close() error { return s.DB.Close() }
 
 // ---------- users ----------
 
+// User 是用户表记录的最小投影。
 type User struct {
 	ID        int64
 	Email     string
 	CreatedAt time.Time
 }
 
+// CreateUser 创建用户；邮箱唯一键冲突时返回 ErrConflict。
 func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (int64, error) {
 	res, err := s.DB.ExecContext(ctx, `INSERT INTO users (email, password_hash) VALUES (?, ?)`, email, passwordHash)
 	if err != nil {
@@ -162,6 +169,7 @@ func (s *Store) CreateUser(ctx context.Context, email, passwordHash string) (int
 	return res.LastInsertId()
 }
 
+// GetUserByEmail 按邮箱查询用户及其密码哈希，供登录校验使用。
 func (s *Store) GetUserByEmail(ctx context.Context, email string) (*User, string, error) {
 	var u User
 	var hash string
@@ -175,6 +183,7 @@ func (s *Store) GetUserByEmail(ctx context.Context, email string) (*User, string
 
 // ---------- conversations ----------
 
+// Conversation 是会话记录，含摘要文本与摘要已覆盖到的消息 seq。
 type Conversation struct {
 	ID           string
 	UserID       int64
@@ -186,6 +195,7 @@ type Conversation struct {
 	MessageCount int
 }
 
+// CreateConversation 新建会话，标题为空时使用“新会话”。
 func (s *Store) CreateConversation(ctx context.Context, id string, userID int64, title string) error {
 	if title == "" {
 		title = "新会话"
@@ -195,6 +205,7 @@ func (s *Store) CreateConversation(ctx context.Context, id string, userID int64,
 	return err
 }
 
+// ListConversations 列出用户会话，按最近更新时间排序，并统计消息条数。
 func (s *Store) ListConversations(ctx context.Context, userID int64) ([]Conversation, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT c.id, c.user_id, c.title, COALESCE(c.summary,''), c.summary_upto, c.created_at, c.updated_at,
@@ -215,6 +226,7 @@ func (s *Store) ListConversations(ctx context.Context, userID int64) ([]Conversa
 	return out, rows.Err()
 }
 
+// GetConversation 按 ID 查询会话，不存在时返回 ErrNotFound。
 func (s *Store) GetConversation(ctx context.Context, id string) (*Conversation, error) {
 	var c Conversation
 	err := s.DB.QueryRowContext(ctx, `
@@ -230,11 +242,13 @@ func (s *Store) GetConversation(ctx context.Context, id string) (*Conversation, 
 	return &c, nil
 }
 
+// RenameConversation 修改会话标题并刷新更新时间。
 func (s *Store) RenameConversation(ctx context.Context, id string, userID int64, title string) error {
 	_, err := s.DB.ExecContext(ctx, `UPDATE conversations SET title = ?, updated_at = NOW() WHERE id = ? AND user_id = ?`, title, id, userID)
 	return err
 }
 
+// DeleteConversation 在事务内删除会话及其消息，会话不存在时返回 ErrNotFound。
 func (s *Store) DeleteConversation(ctx context.Context, id string, userID int64) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -255,11 +269,13 @@ func (s *Store) DeleteConversation(ctx context.Context, id string, userID int64)
 	return tx.Commit()
 }
 
+// TouchConversation 只刷新会话的 updated_at，用于对话完成后置顶会话。
 func (s *Store) TouchConversation(ctx context.Context, id string) error {
 	_, err := s.DB.ExecContext(ctx, `UPDATE conversations SET updated_at = NOW() WHERE id = ?`, id)
 	return err
 }
 
+// SetSummary 保存会话摘要及摘要覆盖到的消息 seq。
 func (s *Store) SetSummary(ctx context.Context, id, summary string, upto int) error {
 	_, err := s.DB.ExecContext(ctx, `UPDATE conversations SET summary = ?, summary_upto = ? WHERE id = ?`, summary, upto, id)
 	return err
@@ -267,6 +283,8 @@ func (s *Store) SetSummary(ctx context.Context, id, summary string, upto int) er
 
 // ---------- messages ----------
 
+// Message 是会话中的一条消息，覆盖用户、assistant、tool 三种角色，
+// 并保留推理内容、工具调用、工具结果与过程 meta。
 type Message struct {
 	ID             int64
 	ConversationID string
@@ -281,6 +299,7 @@ type Message struct {
 	CreatedAt      time.Time
 }
 
+// AppendMessage 追加一条消息；空字段统一写 NULL，避免空串干扰查询。
 func (s *Store) AppendMessage(ctx context.Context, m Message) error {
 	_, err := s.DB.ExecContext(ctx, `
 		INSERT INTO messages (conversation_id, seq, role, content, reasoning, tool_calls, tool_call_id, tool_name, meta)
@@ -290,6 +309,7 @@ func (s *Store) AppendMessage(ctx context.Context, m Message) error {
 	return err
 }
 
+// NextSeq 返回会话的下一个消息序号，保证同一会话内 seq 连续且唯一。
 func (s *Store) NextSeq(ctx context.Context, convID string) (int, error) {
 	var seq sql.NullInt64
 	if err := s.DB.QueryRowContext(ctx,
@@ -302,6 +322,7 @@ func (s *Store) NextSeq(ctx context.Context, convID string) (int, error) {
 	return 1, nil
 }
 
+// ListMessages 按 seq 升序返回会话的全部消息，用于上下文组装与前端恢复。
 func (s *Store) ListMessages(ctx context.Context, convID string) ([]Message, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, conversation_id, seq, role, COALESCE(content,''), COALESCE(reasoning,''),
@@ -325,6 +346,7 @@ func (s *Store) ListMessages(ctx context.Context, convID string) ([]Message, err
 
 // ---------- documents & chunks ----------
 
+// Document 是用户上传的文档记录，包含大小、片段数、状态与错误信息。
 type Document struct {
 	ID         string
 	UserID     int64
@@ -336,6 +358,7 @@ type Document struct {
 	CreatedAt  time.Time
 }
 
+// CreateDocument 写入文档记录，初始状态由调用方决定。
 func (s *Store) CreateDocument(ctx context.Context, d Document) error {
 	_, err := s.DB.ExecContext(ctx, `
 		INSERT INTO documents (id, user_id, name, size, chunk_count, status, err_msg)
@@ -343,16 +366,19 @@ func (s *Store) CreateDocument(ctx context.Context, d Document) error {
 	return err
 }
 
+// UpdateDocumentStatus 更新文档处理状态与失败原因。
 func (s *Store) UpdateDocumentStatus(ctx context.Context, id, status, errMsg string) error {
 	_, err := s.DB.ExecContext(ctx, `UPDATE documents SET status = ?, err_msg = ? WHERE id = ?`, status, nullIfEmpty(errMsg), id)
 	return err
 }
 
+// UpdateDocumentChunkCount 记录文档切分出的片段数量。
 func (s *Store) UpdateDocumentChunkCount(ctx context.Context, id string, n int) error {
 	_, err := s.DB.ExecContext(ctx, `UPDATE documents SET chunk_count = ? WHERE id = ?`, n, id)
 	return err
 }
 
+// ListDocuments 按创建时间倒序返回用户的文档列表。
 func (s *Store) ListDocuments(ctx context.Context, userID int64) ([]Document, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, user_id, name, size, chunk_count, status, COALESCE(err_msg,''), created_at
@@ -372,6 +398,7 @@ func (s *Store) ListDocuments(ctx context.Context, userID int64) ([]Document, er
 	return out, rows.Err()
 }
 
+// DeleteDocument 在事务内删除文档记录与其片段；文档不存在时返回 ErrNotFound。
 func (s *Store) DeleteDocument(ctx context.Context, id string, userID int64) error {
 	tx, err := s.DB.BeginTx(ctx, nil)
 	if err != nil {
@@ -392,6 +419,7 @@ func (s *Store) DeleteDocument(ctx context.Context, id string, userID int64) err
 	return tx.Commit()
 }
 
+// Chunk 是文档切分后的片段，正文存 MySQL，向量按 ID 关联到 Qdrant。
 type Chunk struct {
 	ID         int64
 	DocumentID string
@@ -433,6 +461,7 @@ func (s *Store) InsertChunks(ctx context.Context, chunks []Chunk) ([]int64, erro
 	return ids, nil
 }
 
+// ListChunksByUser 返回某用户的全部片段，用于构建 BM25 索引。
 func (s *Store) ListChunksByUser(ctx context.Context, userID int64) ([]Chunk, error) {
 	rows, err := s.DB.QueryContext(ctx, `
 		SELECT id, document_id, user_id, seq, doc_name, content, embedding
@@ -472,6 +501,7 @@ func (s *Store) ListAllChunks(ctx context.Context) ([]Chunk, error) {
 	return out, rows.Err()
 }
 
+// CountUserChunks 统计用户的片段总数，供统计接口展示。
 func (s *Store) CountUserChunks(ctx context.Context, userID int64) (int, error) {
 	var n int
 	err := s.DB.QueryRowContext(ctx, `SELECT COUNT(*) FROM chunks WHERE user_id = ?`, userID).Scan(&n)
@@ -480,6 +510,7 @@ func (s *Store) CountUserChunks(ctx context.Context, userID int64) (int, error) 
 
 // ---------- helpers ----------
 
+// nullIfEmpty 把空字符串转成 NULL，写入数据库时保持字段语义清晰。
 func nullIfEmpty(v string) any {
 	if strings.TrimSpace(v) == "" {
 		return nil
@@ -487,6 +518,7 @@ func nullIfEmpty(v string) any {
 	return v
 }
 
+// isDup 判断错误是否为 MySQL 唯一键冲突（错误码 1062）。
 func isDup(err error) bool {
 	var me *mysql.MySQLError
 	if errors.As(err, &me) {

@@ -18,11 +18,13 @@ type Cache struct {
 	mem map[string]memEntry
 }
 
+// memEntry 是进程内缓存条目：序列化后的数据与过期时间。
 type memEntry struct {
 	data []byte
 	exp  time.Time
 }
 
+// New 初始化缓存：Redis 可用则用 Redis，Ping 失败或地址为空时退回进程内 TTL 缓存。
 func New(ctx context.Context, addr, password string, db int) *Cache {
 	c := &Cache{mem: make(map[string]memEntry)}
 	if addr == "" {
@@ -39,8 +41,10 @@ func New(ctx context.Context, addr, password string, db int) *Cache {
 	return c
 }
 
+// Available 返回当前是否真正连上了 Redis（false 表示在用进程内缓存）。
 func (c *Cache) Available() bool { return c != nil && c.rdb != nil }
 
+// Close 关闭 Redis 连接，未启用 Redis 时为空操作。
 func (c *Cache) Close() error {
 	if c.rdb != nil {
 		return c.rdb.Close()
@@ -48,6 +52,7 @@ func (c *Cache) Close() error {
 	return nil
 }
 
+// GetJSON 读取缓存并反序列化到 out，未命中或解析失败返回 false。
 func (c *Cache) GetJSON(ctx context.Context, key string, out any) bool {
 	if c == nil {
 		return false
@@ -71,6 +76,7 @@ func (c *Cache) GetJSON(ctx context.Context, key string, out any) bool {
 	return json.Unmarshal(e.data, out) == nil
 }
 
+// SetJSON 序列化后写入缓存并设置 TTL；内存模式会在条目过多时清理过期数据。
 func (c *Cache) SetJSON(ctx context.Context, key string, v any, ttl time.Duration) {
 	if c == nil {
 		return
@@ -98,6 +104,7 @@ func (c *Cache) SetJSON(ctx context.Context, key string, v any, ttl time.Duratio
 	c.mem[key] = memEntry{data: data, exp: time.Now().Add(ttl)}
 }
 
+// Delete 删除若干缓存键，用于文档变更后失效相关缓存。
 func (c *Cache) Delete(ctx context.Context, keys ...string) {
 	if c == nil || len(keys) == 0 {
 		return

@@ -45,6 +45,7 @@ type Config struct {
 	SummaryTokens int
 }
 
+// Load 从环境变量读取全部配置，并校验必填项与取值范围（API Key、JWT 长度、切分参数、TopK）。
 func Load() (*Config, error) {
 	c := &Config{
 		Addr: env("HTTP_ADDR", ":8080"),
@@ -96,6 +97,8 @@ func Load() (*Config, error) {
 	return c, nil
 }
 
+// EmbeddingEnabled 判断是否配置了远程 Embedding：BaseURL、APIKey、Model 三者都非空才启用，
+// 否则回落到内置哈希向量化。
 func (c *Config) EmbeddingEnabled() bool {
 	return c.EmbeddingBaseURL != "" && c.EmbeddingAPIKey != "" && c.EmbeddingModel != ""
 }
@@ -106,6 +109,7 @@ func (c *Config) QdrantEnabled() bool {
 	return c.QdrantURL != "" && c.QdrantCollection != ""
 }
 
+// env 读取字符串环境变量，空值或未设置时返回默认值。
 func env(key, def string) string {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		return v
@@ -113,6 +117,7 @@ func env(key, def string) string {
 	return def
 }
 
+// envInt 读取整数环境变量，缺失或解析失败时返回默认值。
 func envInt(key string, def int) int {
 	if v := strings.TrimSpace(os.Getenv(key)); v != "" {
 		if n, err := strconv.Atoi(v); err == nil {

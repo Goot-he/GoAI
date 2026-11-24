@@ -19,6 +19,7 @@ import (
 	"agentragract/internal/store"
 )
 
+// API 汇集全部 HTTP 处理器依赖：配置、存储、RAG、Agent 与缓存开关。
 type API struct {
 	cfg          *config.Config
 	st           *store.Store
@@ -27,6 +28,7 @@ type API struct {
 	cacheEnabled bool
 }
 
+// newUUID 生成 32 位十六进制随机串，用作会话与文档 ID。
 func newUUID() string {
 	b := make([]byte, 16)
 	_, _ = rand.Read(b)
@@ -35,6 +37,7 @@ func newUUID() string {
 
 // ---------- conversations ----------
 
+// ListConversations 返回当前用户的会话列表（标题、消息数、是否已有摘要）。
 func (a *API) ListConversations(c *gin.Context) {
 	list, err := a.st.ListConversations(c.Request.Context(), userIDFrom(c))
 	if err != nil {
@@ -53,6 +56,7 @@ func (a *API) ListConversations(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"conversations": items})
 }
 
+// CreateConversation 新建一个空会话并返回会话 ID。
 func (a *API) CreateConversation(c *gin.Context) {
 	var req struct {
 		Title string `json:"title"`
@@ -66,6 +70,8 @@ func (a *API) CreateConversation(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"id": id, "title": orDefault(req.Title, "新会话")})
 }
 
+// GetMessages 返回指定会话的全部消息（含 reasoning、tool_calls 与 meta），
+// 前端据此恢复历史对话与思考面板。
 func (a *API) GetMessages(c *gin.Context) {
 	convID := c.Param("id")
 	conv, err := a.st.GetConversation(c.Request.Context(), convID)
@@ -103,6 +109,7 @@ func (a *API) GetMessages(c *gin.Context) {
 	})
 }
 
+// schemaToolCallLite 是返回给前端的精简 tool_call 结构，只保留 id 与函数名/参数。
 type schemaToolCallLite struct {
 	ID       string `json:"id"`
 	Function struct {
@@ -111,6 +118,7 @@ type schemaToolCallLite struct {
 	} `json:"function"`
 }
 
+// RenameConversation 修改会话标题。
 func (a *API) RenameConversation(c *gin.Context) {
 	var req struct {
 		Title string `json:"title"`
@@ -126,6 +134,7 @@ func (a *API) RenameConversation(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"ok": true})
 }
 
+// DeleteConversation 删除会话及其全部消息。
 func (a *API) DeleteConversation(c *gin.Context) {
 	err := a.st.DeleteConversation(c.Request.Context(), c.Param("id"), userIDFrom(c))
 	if err != nil {
@@ -137,11 +146,13 @@ func (a *API) DeleteConversation(c *gin.Context) {
 
 // ---------- chat ----------
 
+// chatRequest 是对话接口的请求体：会话 ID、用户消息、是否流式。
 type chatRequest struct {
 	ConversationID string `json:"conversation_id"`
 	Message        string `json:"message"`
 }
 
+// prepareConversation 取已有会话或新建会话，并校验会话归属当前用户。
 func (a *API) prepareConversation(c *gin.Context, convID string) (*store.Conversation, error) {
 	uid := userIDFrom(c)
 	if strings.TrimSpace(convID) == "" {
@@ -161,6 +172,7 @@ func (a *API) prepareConversation(c *gin.Context, convID string) (*store.Convers
 	return conv, nil
 }
 
+// Chat 处理非流式对话：收集完整回答、推理内容、过程步骤与用量后一次性返回。
 func (a *API) Chat(c *gin.Context) {
 	var req chatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -198,6 +210,8 @@ func (a *API) Chat(c *gin.Context) {
 	})
 }
 
+// ChatStream 处理流式对话：以 SSE 逐条推送 status/reasoning/delta/tool_call/
+// tool_result/usage/done/error 事件，前端据此渲染流式正文与思考面板。
 func (a *API) ChatStream(c *gin.Context) {
 	var req chatRequest
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -263,6 +277,8 @@ func (a *API) ChatStream(c *gin.Context) {
 
 // ---------- documents ----------
 
+// UploadDocument 接收文档上传：校验类型与大小，同步解析、切分、向量化入库，
+// 成功后返回文档 ID 与片段数。
 func (a *API) UploadDocument(c *gin.Context) {
 	fh, err := c.FormFile("file")
 	if err != nil {
@@ -319,6 +335,7 @@ func (a *API) UploadDocument(c *gin.Context) {
 	})
 }
 
+// ListDocuments 返回当前用户已上传的文档及其状态、片段数。
 func (a *API) ListDocuments(c *gin.Context) {
 	docs, err := a.st.ListDocuments(c.Request.Context(), userIDFrom(c))
 	if err != nil {
@@ -335,6 +352,7 @@ func (a *API) ListDocuments(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"documents": items})
 }
 
+// DeleteDocument 删除文档：MySQL 记录、Qdrant 向量与内存索引一并清理。
 func (a *API) DeleteDocument(c *gin.Context) {
 	uid := userIDFrom(c)
 	if err := a.st.DeleteDocument(c.Request.Context(), c.Param("id"), uid); err != nil {
@@ -347,6 +365,7 @@ func (a *API) DeleteDocument(c *gin.Context) {
 
 // ---------- misc ----------
 
+// Stats 返回当前模型、Embedder、向量库以及文档/片段/会话数量，供前端状态栏展示。
 func (a *API) Stats(c *gin.Context) {
 	uid := userIDFrom(c)
 	docs, _ := a.st.ListDocuments(c.Request.Context(), uid)
@@ -364,11 +383,13 @@ func (a *API) Stats(c *gin.Context) {
 	})
 }
 
+// Health 是健康检查接口，探测 MySQL 连通性。
 func (a *API) Health(c *gin.Context) {
 	err := a.st.DB.PingContext(c.Request.Context())
 	c.JSON(http.StatusOK, gin.H{"status": "ok", "mysql": err == nil})
 }
 
+// NotFound 是兜底处理器，返回统一的 JSON 404 而不是 Gin 默认页面。
 func (a *API) NotFound(c *gin.Context) {
 	c.JSON(http.StatusNotFound, gin.H{"error": "not found", "path": c.Request.URL.Path})
 }

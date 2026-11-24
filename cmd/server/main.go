@@ -20,6 +20,8 @@ import (
 	"agentragract/internal/store"
 )
 
+// main 是服务入口：加载配置、连接 MySQL/Redis、装配 Embedder 与 Qdrant、
+// 创建 ChatModel/Agent/Router，并启动 HTTP 服务、监听退出信号做优雅关闭。
 func main() {
 	log.SetFlags(log.LstdFlags | log.Lshortfile)
 

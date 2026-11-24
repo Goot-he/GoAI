@@ -13,12 +13,14 @@ import (
 	"agentragract/internal/store"
 )
 
+// Claims 是 JWT 载荷：用户 ID、邮箱以及过期时间等标准声明。
 type Claims struct {
 	UserID int64  `json:"uid"`
 	Email  string `json:"email"`
 	jwt.RegisteredClaims
 }
 
+// issueToken 用 HS256 签发包含用户信息的 JWT。
 func (a *API) issueToken(userID int64, email string) (string, error) {
 	claims := Claims{
 		UserID: userID,
@@ -32,6 +34,7 @@ func (a *API) issueToken(userID int64, email string) (string, error) {
 	return jwt.NewWithClaims(jwt.SigningMethodHS256, claims).SignedString([]byte(a.cfg.JWTSecret))
 }
 
+// authRequired 返回鉴权中间件：校验 Bearer Token，并把 userID/email 写入请求上下文。
 func (a *API) authRequired() gin.HandlerFunc {
 	return func(c *gin.Context) {
 		raw := c.GetHeader("Authorization")
@@ -57,17 +60,20 @@ func (a *API) authRequired() gin.HandlerFunc {
 	}
 }
 
+// userIDFrom 从上下文取出当前登录用户 ID，未登录时返回 0。
 func userIDFrom(c *gin.Context) int64 {
 	v, _ := c.Get("userID")
 	id, _ := v.(int64)
 	return id
 }
 
+// credentials 是注册与登录接口的请求体。
 type credentials struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
+// Register 处理注册：校验邮箱与密码、bcrypt 存库、签发 JWT 并返回用户信息。
 func (a *API) Register(c *gin.Context) {
 	var req credentials
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -105,6 +111,7 @@ func (a *API) Register(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"token": token, "user": gin.H{"id": id, "email": req.Email}})
 }
 
+// Login 处理登录：按邮箱查询用户，bcrypt 校验通过后签发 JWT。
 func (a *API) Login(c *gin.Context) {
 	var req credentials
 	if err := c.ShouldBindJSON(&req); err != nil {
@@ -125,6 +132,7 @@ func (a *API) Login(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"token": token, "user": gin.H{"id": user.ID, "email": user.Email}})
 }
 
+// Me 返回当前登录用户的 ID 与邮箱，供前端恢复登录态。
 func (a *API) Me(c *gin.Context) {
 	c.JSON(http.StatusOK, gin.H{"user": gin.H{
 		"id":    userIDFrom(c),

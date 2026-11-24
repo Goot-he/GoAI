@@ -24,6 +24,7 @@ type QdrantStore struct {
 	client     *http.Client
 }
 
+// NewQdrantStore 创建 Qdrant REST 客户端；dim 用于建集合时声明向量维度。
 func NewQdrantStore(baseURL, collection, apiKey string, dim int) *QdrantStore {
 	return &QdrantStore{
 		baseURL:    baseURL,
@@ -34,6 +35,7 @@ func NewQdrantStore(baseURL, collection, apiKey string, dim int) *QdrantStore {
 	}
 }
 
+// Name 返回向量库标识（qdrant:集合名），用于统计展示。
 func (q *QdrantStore) Name() string { return "qdrant:" + q.collection }
 
 // EnsureCollection 创建集合（若不存在），并建立过滤字段索引。

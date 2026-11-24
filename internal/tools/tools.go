@@ -13,13 +13,16 @@ import (
 	"agentragract/internal/store"
 )
 
+// SearchArgs 是 search_knowledge 的参数：自然语言查询与返回片段数。
 type SearchArgs struct {
 	Query string `json:"query" jsonschema:"required" jsonschema_description:"检索用的自然语言问题或关键词，尽量具体，例如“退货期限是几天”"`
 	TopK  int    `json:"top_k,omitempty" jsonschema_description:"返回片段数量，1-8，默认 5"`
 }
 
+// DocumentArgs 是 list_documents 的空参数，调用时无需任何输入。
 type DocumentArgs struct{}
 
+// TimeArgs 是 current_time 的参数：可选 IANA 时区名。
 type TimeArgs struct {
 	Timezone string `json:"timezone,omitempty" jsonschema_description:"IANA 时区名，默认 Asia/Shanghai"`
 }

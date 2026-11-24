@@ -24,12 +24,14 @@ type Hit struct {
 	Score      float64 `json:"score"`
 }
 
+// indexedItem 是 BM25 索引中的一条片段：原始片段、词频表与词数。
 type indexedItem struct {
 	chunk  store.Chunk
 	tf     map[string]int
 	length int
 }
 
+// userIndex 是单个用户的 BM25 索引；version 变化会让检索缓存自动失效。
 type userIndex struct {
 	version int64
 	items   []*indexedItem
@@ -52,6 +54,7 @@ type Service struct {
 	indexes map[int64]*userIndex
 }
 
+// NewService 构造 RAG 服务，向量库可为 nil（此时退化为纯 BM25）。
 func NewService(st *store.Store, emb Embedder, vectors *QdrantStore, chunker *Chunker, c *cache.Cache, topK int) *Service {
 	return &Service{
 		store:    st,
@@ -64,6 +67,7 @@ func NewService(st *store.Store, emb Embedder, vectors *QdrantStore, chunker *Ch
 	}
 }
 
+// EmbedderName 返回当前 Embedder 标识，用于缓存键与前端统计展示。
 func (s *Service) EmbedderName() string { return s.embedder.Name() }
 
 // VectorStoreName 返回当前向量库标识，未启用时返回 "disabled(BM25 only)"。
@@ -181,6 +185,8 @@ func (s *Service) Invalidate(userID int64) {
 	delete(s.indexes, userID)
 }
 
+// getIndex 返回用户的 BM25 索引：有缓存直接复用，否则从 MySQL 全量构建，
+// 并计算词频、文档频率与平均长度。
 func (s *Service) getIndex(ctx context.Context, userID int64) (*userIndex, error) {
 	s.mu.Lock()
 	if idx, ok := s.indexes[userID]; ok {
@@ -353,6 +359,7 @@ func (s *Service) Search(ctx context.Context, userID int64, query string, topK i
 	return hits, nil
 }
 
+// embedQuery 对查询文本做向量化，结果缓存 24 小时以减少 Embedding 调用。
 func (s *Service) embedQuery(ctx context.Context, query string) ([]float32, error) {
 	key := "emb:" + fmt.Sprintf("%x", hashString(query)) + ":" + s.embedder.Name()
 	var cached []float32
@@ -370,11 +377,13 @@ func (s *Service) embedQuery(ctx context.Context, query string) ([]float32, erro
 	return vecs[0], nil
 }
 
+// bm25Candidate 是 BM25 召回的候选：片段键与得分。
 type bm25Candidate struct {
 	id    string
 	score float64
 }
 
+// bm25Scores 计算查询对各片段的 BM25 得分（k1=1.5，b=0.75）。
 func bm25Scores(query string, idx *userIndex) []bm25Candidate {
 	const k1, b = 1.5, 0.75
 	qTokens := Tokenize(query)
@@ -401,8 +410,10 @@ func bm25Scores(query string, idx *userIndex) []bm25Candidate {
 	return out
 }
 
+// chunkKey 生成片段的稳定键（文档 ID + 段号），用于融合两路召回结果。
 func chunkKey(c store.Chunk) string { return c.DocumentID + "#" + fmt.Sprint(c.Seq) }
 
+// dedup 去掉查询词中的重复项，避免同一词重复累加 BM25 得分。
 func dedup(tokens []string) []string {
 	seen := make(map[string]struct{}, len(tokens))
 	out := make([]string, 0, len(tokens))
@@ -416,12 +427,14 @@ func dedup(tokens []string) []string {
 	return out
 }
 
+// hashString 用 FNV-64a 计算字符串哈希，用于生成缓存键。
 func hashString(s string) uint64 {
 	h := fnv.New64a()
 	_, _ = h.Write([]byte(s))
 	return h.Sum64()
 }
 
+// snippet 按 rune 截断片段正文，控制给模型的上下文体积。
 func snippet(s string, maxRunes int) string {
 	r := []rune(s)
 	if len(r) <= maxRunes {

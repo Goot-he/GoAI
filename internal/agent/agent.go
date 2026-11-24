@@ -22,8 +22,10 @@ import (
 	"agentragract/internal/tools"
 )
 
+// EventType 标识一轮对话中推送的过程事件类型。
 type EventType string
 
+// 事件类型常量：状态、推理、正文增量、工具调用、工具结果、用量、结束与错误。
 const (
 	EventStatus     EventType = "status"
 	EventReasoning  EventType = "reasoning"
@@ -45,6 +47,8 @@ type Event struct {
 	Step           int       `json:"step,omitempty"`
 }
 
+// Step 表示一轮对话里的一条思考轨迹（状态、工具调用、工具结果），
+// 会写入消息 meta.steps，供前端在会话恢复时回放思考面板。
 type Step struct {
 	Type string `json:"type"`
 	Text string `json:"text,omitempty"`
@@ -52,12 +56,14 @@ type Step struct {
 	Args string `json:"args,omitempty"`
 }
 
+// Usage 汇总一轮对话的 token 用量。
 type Usage struct {
 	PromptTokens     int `json:"prompt_tokens"`
 	CompletionTokens int `json:"completion_tokens"`
 	TotalTokens      int `json:"total_tokens"`
 }
 
+// Result 是一轮对话的最终结果，供非流式接口直接返回。
 type Result struct {
 	ConversationID string
 	Title          string
@@ -67,6 +73,8 @@ type Result struct {
 	Usage          Usage
 }
 
+// Service 是 Agent 编排服务：持有配置、存储、RAG 与 ChatModel，
+// 负责组装上下文、驱动 Eino Agent 循环并持久化消息。
 type Service struct {
 	cfg  *config.Config
 	st   *store.Store
@@ -76,15 +84,19 @@ type Service struct {
 	locks sync.Map // conversationID -> *sync.Mutex
 }
 
+// New 构造 Agent 服务，依赖由 main 装配后注入。
 func New(cfg *config.Config, st *store.Store, ragSvc *rag.Service, chat model.BaseChatModel) *Service {
 	return &Service{cfg: cfg, st: st, rag: ragSvc, chat: chat}
 }
 
+// convLock 取会话级互斥锁，保证同一会话的请求串行处理，避免消息 seq 竞争。
 func (s *Service) convLock(id string) *sync.Mutex {
 	v, _ := s.locks.LoadOrStore(id, &sync.Mutex{})
 	return v.(*sync.Mutex)
 }
 
+// systemPrompt 是系统提示词：约束检索优先、禁止编造、规定引用方式，
+// 并说明 current_time / list_documents 两个工具的触发场景。
 const systemPrompt = `你是「文档知识助手」，一个基于用户已上传文档回答问题的 Go AI Agent。
 
 工作方式：
@@ -369,6 +381,7 @@ func (s *Service) consumeStream(sr *schema.StreamReader[*schema.Message], stream
 	return full, nil
 }
 
+// statusForTool 把工具名映射成展示给用户看的中文状态文案。
 func statusForTool(name string) string {
 	switch name {
 	case "search_knowledge":
@@ -382,6 +395,8 @@ func statusForTool(name string) string {
 	}
 }
 
+// newRunner 为指定用户构造 Eino ADK Runner：工具集通过闭包绑定 userID，
+// 并开启流式输出，使前端能实时看到增量与工具轨迹。
 func (s *Service) newRunner(ctx context.Context, userID int64) (*adk.Runner, error) {
 	ts, err := tools.Build(s.rag, s.st, userID)
 	if err != nil {
@@ -526,6 +541,7 @@ func (s *Service) maybeSummarize(ctx context.Context, conv *store.Conversation, 
 	return nil
 }
 
+// truncateRunes 按 rune 截断字符串并追加省略号，避免切断中文或多字节字符。
 func truncateRunes(s string, max int) string {
 	r := []rune(s)
 	if len(r) <= max {
@@ -534,6 +550,7 @@ func truncateRunes(s string, max int) string {
 	return string(r[:max]) + "…"
 }
 
+// estimateTokens 粗略估算历史消息的 token 数，用于判断是否需要摘要压缩。
 func estimateTokens(msgs []store.Message) int {
 	total := 0
 	for _, m := range msgs {

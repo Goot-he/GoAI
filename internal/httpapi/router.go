@@ -14,6 +14,8 @@ import (
 	"agentragract/internal/webui"
 )
 
+// NewRouter 组装路由：/api 分组、JWT 保护的业务接口、健康检查，
+// 以及内嵌的前端静态资源（index.html / app.js / app.css）。
 func NewRouter(cfg *config.Config, st *store.Store, ragSvc *rag.Service, ag *agent.Service, cacheEnabled bool) *gin.Engine {
 	a := &API{cfg: cfg, st: st, rag: ragSvc, agent: ag, cacheEnabled: cacheEnabled}
 
@@ -75,6 +77,7 @@ func NewRouter(cfg *config.Config, st *store.Store, ragSvc *rag.Service, ag *age
 	return r
 }
 
+// orDefault 在字符串为空时返回默认值。
 func orDefault(v, def string) string {
 	if v == "" {
 		return def

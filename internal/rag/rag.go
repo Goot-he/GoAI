@@ -21,6 +21,7 @@ import (
 
 // ---------- Embedder ----------
 
+// Embedder 是向量化抽象：批量把文本转成向量，并暴露维度与名称。
 type Embedder interface {
 	Embed(ctx context.Context, texts []string) ([][]float32, error)
 	Dim() int
@@ -32,6 +33,7 @@ type Embedder interface {
 // 语义能力弱于真实 embedding，因此检索默认与 BM25 混合。
 type HashEmbedder struct{ dim int }
 
+// NewHashEmbedder 创建零依赖的特征哈希 Embedder；dim<=0 时默认 384 维。
 func NewHashEmbedder(dim int) *HashEmbedder {
 	if dim <= 0 {
 		dim = 384
@@ -39,9 +41,13 @@ func NewHashEmbedder(dim int) *HashEmbedder {
 	return &HashEmbedder{dim: dim}
 }
 
-func (h *HashEmbedder) Dim() int     { return h.dim }
+// Dim 返回哈希向量的维度。
+func (h *HashEmbedder) Dim() int { return h.dim }
+
+// Name 返回哈希 Embedder 的固定标识 hash。
 func (h *HashEmbedder) Name() string { return "hash" }
 
+// Embed 批量向量化，逐条调用 embedOne 做哈希投影。
 func (h *HashEmbedder) Embed(_ context.Context, texts []string) ([][]float32, error) {
 	out := make([][]float32, len(texts))
 	for i, t := range texts {
@@ -50,6 +56,8 @@ func (h *HashEmbedder) Embed(_ context.Context, texts []string) ([][]float32, er
 	return out, nil
 }
 
+// embedOne 把单条文本映射成定长向量：分词后按 FNV 哈希定位维度与符号，
+// 长词降权，最后做 L2 归一化。
 func (h *HashEmbedder) embedOne(text string) []float32 {
 	vec := make([]float32, h.dim)
 	for _, tok := range Tokenize(text) {
@@ -80,6 +88,8 @@ type OpenAIEmbedder struct {
 	client                 *http.Client
 }
 
+// NewOpenAIEmbedder 创建 OpenAI 兼容 Embedding 客户端，
+// 可接 Ollama、DashScope、硅基流动等提供 /embeddings 的服务。
 func NewOpenAIEmbedder(baseURL, apiKey, model string, dim int) *OpenAIEmbedder {
 	return &OpenAIEmbedder{
 		baseURL: strings.TrimRight(baseURL, "/"),
@@ -90,9 +100,13 @@ func NewOpenAIEmbedder(baseURL, apiKey, model string, dim int) *OpenAIEmbedder {
 	}
 }
 
-func (o *OpenAIEmbedder) Dim() int     { return o.dim }
+// Dim 返回远程 Embedding 的向量维度。
+func (o *OpenAIEmbedder) Dim() int { return o.dim }
+
+// Name 返回带模型名的标识（openai:模型），用于缓存键隔离。
 func (o *OpenAIEmbedder) Name() string { return "openai:" + o.model }
 
+// Embed 调用 /embeddings 批量向量化，校验返回数量与维度，并统一做 L2 归一化。
 func (o *OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32, error) {
 	if len(texts) == 0 {
 		return nil, nil
@@ -142,6 +156,7 @@ func (o *OpenAIEmbedder) Embed(ctx context.Context, texts []string) ([][]float32
 
 // ---------- 向量编解码 ----------
 
+// EncodeVector 把 float32 向量按小端序编码为字节，用于旧版 MySQL BLOB 存储。
 func EncodeVector(v []float32) []byte {
 	buf := make([]byte, 4*len(v))
 	for i, f := range v {
@@ -150,6 +165,7 @@ func EncodeVector(v []float32) []byte {
 	return buf
 }
 
+// DecodeVector 把字节还原成 float32 向量，与 EncodeVector 对应。
 func DecodeVector(b []byte) []float32 {
 	n := len(b) / 4
 	out := make([]float32, n)
@@ -159,6 +175,7 @@ func DecodeVector(b []byte) []float32 {
 	return out
 }
 
+// normalize 对向量做 L2 归一化；零向量原样返回，避免除零。
 func normalize(v []float32) []float32 {
 	var sum float64
 	for _, f := range v {
@@ -188,8 +205,11 @@ func Cosine(a, b []float32) float64 {
 
 // ---------- 分词（中文 bigram + ASCII 词） ----------
 
+// asciiWord 匹配英文/数字词项，供分词函数使用。
 var asciiWord = regexp.MustCompile(`[a-z0-9_]+`)
 
+// Tokenize 是检索与哈希向量共用的分词器：中文按单字与二元组切分，
+// ASCII 按单词切分并转小写。
 func Tokenize(text string) []string {
 	text = strings.ToLower(text)
 	var out []string
@@ -232,8 +252,10 @@ func Tokenize(text string) []string {
 
 // ---------- 文档解析 ----------
 
+// ErrUnsupportedFile 表示上传的文件类型不在支持范围内。
 var ErrUnsupportedFile = errors.New("仅支持 .txt / .md / .markdown / .docx 文档")
 
+// ExtractText 按扩展名提取纯文本：txt/md/log/csv 直读，docx 解包后清洗。
 func ExtractText(name string, data []byte) (string, error) {
 	ext := strings.ToLower(filepath.Ext(name))
 	switch ext {
@@ -246,6 +268,7 @@ func ExtractText(name string, data []byte) (string, error) {
 	}
 }
 
+// normalizeNewlines 统一换行为 \n 并去掉首尾空白。
 func normalizeNewlines(s string) string {
 	s = strings.ReplaceAll(s, "\r\n", "\n")
 	s = strings.ReplaceAll(s, "\r", "\n")
@@ -295,12 +318,14 @@ func extractDocx(data []byte) (string, error) {
 
 // ---------- 递归切分 ----------
 
+// Chunker 是递归切分器：按分隔符层级把长文本切成不超过 Size 的片段。
 type Chunker struct {
 	Size       int
 	Overlap    int
 	Separators []string
 }
 
+// NewChunker 创建切分器，分隔符从段落、换行、句号逐级降级到字符。
 func NewChunker(size, overlap int) *Chunker {
 	return &Chunker{
 		Size:       size,
@@ -309,6 +334,7 @@ func NewChunker(size, overlap int) *Chunker {
 	}
 }
 
+// Split 是切分入口：递归切分后叠加相邻重叠，并过滤过短的碎片。
 func (c *Chunker) Split(text string) []string {
 	text = strings.TrimSpace(text)
 	if text == "" {
@@ -326,6 +352,8 @@ func (c *Chunker) Split(text string) []string {
 	return out
 }
 
+// splitRecursive 用当前层级分隔符切分；仍超长则递归到更细的分隔符，
+// 分隔符用尽后按固定长度硬切。
 func (c *Chunker) splitRecursive(text string, sepIdx int) []string {
 	if len([]rune(text)) <= c.Size {
 		return []string{text}
@@ -351,6 +379,7 @@ func (c *Chunker) splitRecursive(text string, sepIdx int) []string {
 	return mergeAtoms(atoms, sep, c.Size)
 }
 
+// mergeAtoms 把相邻片段按分隔符合并，尽量填满但不超过 size。
 func mergeAtoms(atoms []string, sep string, size int) []string {
 	var out []string
 	var cur strings.Builder
@@ -385,6 +414,7 @@ func mergeAtoms(atoms []string, sep string, size int) []string {
 	return out
 }
 
+// hardSplit 在无可用分隔符时按固定长度切分 rune 序列。
 func hardSplit(runes []rune, size int) []string {
 	var out []string
 	for i := 0; i < len(runes); i += size {
@@ -397,6 +427,7 @@ func hardSplit(runes []rune, size int) []string {
 	return out
 }
 
+// withOverlap 给每个片段拼接上一块尾部内容作为重叠，保持跨块语义连续。
 func (c *Chunker) withOverlap(chunks []string) []string {
 	if c.Overlap <= 0 || len(chunks) <= 1 {
 		return chunks
